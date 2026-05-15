@@ -208,14 +208,22 @@ async function _runDownload(id: string, url: string, presetId: string) {
         const mergedBlob = await mergeRes.blob();
         const mergedPath = cacheDir + `merged.${streamInfo.ext}`;
 
-        // Write blob to file system
-        const arrayBuffer = await mergedBlob.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        const binaryString = String.fromCharCode(...uint8Array);
-        const base64 = btoa(binaryString);
-
-        await FileSystem.writeAsStringAsync(mergedPath, base64, {
-          encoding: FileSystem.EncodingType.Base64,
+        // Write blob to file system using base64
+        const reader = new FileReader();
+        await new Promise<void>((resolve, reject) => {
+          reader.onload = async () => {
+            try {
+              const base64 = (reader.result as string).split(',')[1];
+              await FileSystem.writeAsStringAsync(mergedPath, base64, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(mergedBlob);
         });
 
         finalUri = mergedPath;
