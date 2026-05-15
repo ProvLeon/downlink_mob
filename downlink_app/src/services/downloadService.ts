@@ -17,9 +17,24 @@ import * as MediaLibrary from 'expo-media-library';
 import { FORMAT_PRESETS } from '../types/index';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-// Change this to your deployed Railway/Fly.io URL in production
+// For development on physical device: Use your machine's local IP (e.g., 192.168.x.x)
+// For development on simulator: Can use localhost
+// For production: Uses Render URL
 const API_BASE = __DEV__
-  ? 'http://localhost:8000'
+  ? (() => {
+    // In development, try to use a sensible default
+    // You can override this by setting an environment variable
+    // or by editing this directly to your machine's IP
+    try {
+      const env = require('../env.json');
+      return env.API_URL || 'http://localhost:8000';
+    } catch {
+      // If env.json doesn't exist, fall back to localhost
+      // For physical device testing, manually set your machine's IP here:
+      // return 'http://192.168.x.x:8000';
+      return 'http://localhost:8000';
+    }
+  })()
   : 'https://downlink-mob.onrender.com';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -160,7 +175,10 @@ async function _runDownload(id: string, url: string, presetId: string) {
 
     streamInfo = await res.json();
   } catch (err: any) {
-    update(id, { status: 'failed', error: err.message ?? 'Network error' });
+    const errorMsg = err.message ?? 'Network error';
+    console.error('[DownloadService] Network error:', errorMsg);
+    console.error('[DownloadService] API_BASE:', API_BASE);
+    update(id, { status: 'failed', error: `Network error: ${errorMsg}. Make sure backend is running at ${API_BASE}` });
     return;
   }
 
