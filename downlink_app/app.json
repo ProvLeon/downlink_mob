@@ -7,7 +7,7 @@
     "icon": "./assets/downlink-square.png",
     "scheme": "downlink",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "bundleIdentifier": "com.downlink.app",
       "supportsTablet": true,
@@ -64,7 +64,7 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": false
     },
     "extra": {
       "router": {},
