@@ -17,8 +17,8 @@ import * as MediaLibrary from 'expo-media-library';
 import { FORMAT_PRESETS } from '../types/index';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-// Backend API URL - hosted on Render
-const API_BASE = 'https://downlink-mob.onrender.com';
+// Backend API URL - use localhost for local development
+const API_BASE = 'http://localhost:8000';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type DownloadStatus =
