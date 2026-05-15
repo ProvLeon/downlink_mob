@@ -17,8 +17,12 @@ import * as MediaLibrary from 'expo-media-library';
 import { FORMAT_PRESETS } from '../types/index';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-// Backend API URL - use localhost for local development
-const API_BASE = 'http://localhost:8000';
+// Dynamic API URL based on environment
+// Development: Use local backend (http://localhost:8000)
+// Production: Use Render backend (https://downlink-mob.onrender.com)
+const API_BASE = __DEV__
+  ? 'http://localhost:8000'
+  : 'https://downlink-mob.onrender.com';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type DownloadStatus =
@@ -145,6 +149,7 @@ async function _runDownload(id: string, url: string, presetId: string) {
   };
 
   try {
+    console.log('[DownloadService] Fetching formats from:', `${API_BASE}/api/formats`);
     const res = await fetch(`${API_BASE}/api/formats`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -152,16 +157,25 @@ async function _runDownload(id: string, url: string, presetId: string) {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail ?? 'Failed to resolve stream URLs');
+      let err: any;
+      try {
+        err = await res.json();
+        throw new Error(err.detail ?? `HTTP ${res.status}: ${err.error ?? 'Failed to resolve stream URLs'}`);
+      } catch (parseErr) {
+        // Response is not JSON, read as text
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.substring(0, 200)}`);
+      }
     }
 
     streamInfo = await res.json();
+    console.log('[DownloadService] Successfully fetched stream info');
   } catch (err: any) {
     const errorMsg = err.message ?? 'Network error';
-    console.error('[DownloadService] Network error:', errorMsg);
+    console.error('[DownloadService] Error:', errorMsg);
     console.error('[DownloadService] API_BASE:', API_BASE);
-    update(id, { status: 'failed', error: `Network error: ${errorMsg}. Make sure backend is running at ${API_BASE}` });
+    console.error('[DownloadService] Is dev:', __DEV__);
+    update(id, { status: 'failed', error: `Failed: ${errorMsg}. Backend: ${API_BASE}` });
     return;
   }
 
