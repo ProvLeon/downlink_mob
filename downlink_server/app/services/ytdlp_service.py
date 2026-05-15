@@ -49,10 +49,25 @@ def get_video_info(url: str) -> Dict[str, Any]:
     Return full metadata + all available formats for a URL.
     Format objects include the direct CDN `url` field.
     """
-    opts = _make_opts()
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        return ydl.sanitize_info(info)
+    # Try multiple times with different player clients
+    player_clients = ["web", "mweb", "android", "ios"]
+    last_error = None
+
+    for player_client in player_clients:
+        try:
+            opts = _make_opts(
+                {
+                    "extractor_args": f"youtube:player_client={player_client}",
+                }
+            )
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return ydl.sanitize_info(info)
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise last_error or Exception("Failed to extract video info after retries")
 
 
 def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
