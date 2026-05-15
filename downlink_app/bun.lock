@@ -29,7 +29,7 @@
         "expo-system-ui": "~6.0.9",
         "expo-task-manager": "~14.0.9",
         "expo-web-browser": "~15.0.11",
-        "ffmpeg-kit-react-native": "^6.0.2",
+        "ffmpeg-kit-react-native": "^5.1.0",
         "lucide-react-native": "^1.16.0",
         "react": "19.1.0",
         "react-dom": "19.1.0",
@@ -930,7 +930,7 @@
 
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
-    "ffmpeg-kit-react-native": ["ffmpeg-kit-react-native@6.0.2", "", { "peerDependencies": { "react": "*", "react-native": "*" } }, "sha512-r9uSmahq8TeyIb7fXf3ft+uUXyoeWRFa99+khjo0TAzWO9y0z9wU7eGnab9JLw1MmCB9v64o4yojNluJhVm9nQ=="],
+    "ffmpeg-kit-react-native": ["ffmpeg-kit-react-native@5.1.0", "", { "peerDependencies": { "react": "*", "react-native": "*" } }, "sha512-WGuF7wm18vvhr1oCMLRfHIDCwKrmBezWgVtzim6Z3cbDiHeYvDjpm7KJwrvBMwOgekQtP4R4zI9W0ZByoXjMnQ=="],
 
     "file-entry-cache": ["file-entry-cache@8.0.0", "", { "dependencies": { "flat-cache": "^4.0.0" } }, "sha512-XXTUwCvisa5oacNGRP9SfNtYBNAMi+RPwBFmblZEF7N7swHYQS6/Zfk7SRwx4D5j3CH211YNRco1DEMNVfZCnQ=="],
 
