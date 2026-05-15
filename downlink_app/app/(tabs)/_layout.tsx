@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from 'expo-router';
-import { DownloadCloud, CheckCircle, Settings, Plus } from 'lucide-react-native';
+import { Home, DownloadCloud, CheckCircle, Settings, Plus } from 'lucide-react-native';
 import { View, StyleSheet, Pressable } from 'react-native';
 
 export default function TabLayout() {
@@ -27,6 +27,13 @@ export default function TabLayout() {
     >
       <Tabs.Screen
         name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color }) => <Home size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="queue"
         options={{
           title: 'Queue',
           tabBarIcon: ({ color }) => <DownloadCloud size={24} color={color} />,

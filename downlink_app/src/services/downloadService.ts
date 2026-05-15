@@ -1,41 +1,24 @@
 /**
- * Downlink Download Service
- *
- * Full download flow:
- *  1. Call /api/formats on the Downlink backend (cheap — just JSON metadata)
- *  2. For merged files (video + audio):
- *     - Call /api/merge with the two stream URLs, backend handles FFmpeg
- *     - Save merged file to device gallery
- *  3. For single stream (video or audio only):
- *     - Download directly from YouTube CDN to app cache
- *     - Save to device gallery
- *  4. Notify subscribers so the UI updates in real-time
- */
+* Downlink Download Service
+*
+* Full download flow:
+*  1. Call /api/formats on the Downlink backend (cheap — just JSON metadata)
+*  2. For merged files (video + audio):
+*     - Call /api/merge with the two stream URLs, backend handles FFmpeg
+*     - Save merged file to device gallery
+*  3. For single stream (video or audio only):
+*     - Download directly from YouTube CDN to app cache
+*     - Save to device gallery
+*  4. Notify subscribers so the UI updates in real-time
+*/
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { FORMAT_PRESETS } from '../types/index';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-// For development on physical device: Use your machine's local IP (e.g., 192.168.x.x)
-// For development on simulator: Can use localhost
-// For production: Uses Render URL
-const API_BASE = __DEV__
-  ? (() => {
-    // In development, try to use a sensible default
-    // You can override this by setting an environment variable
-    // or by editing this directly to your machine's IP
-    try {
-      const env = require('../env.json');
-      return env.API_URL || 'http://localhost:8000';
-    } catch {
-      // If env.json doesn't exist, fall back to localhost
-      // For physical device testing, manually set your machine's IP here:
-      // return 'http://192.168.x.x:8000';
-      return 'http://localhost:8000';
-    }
-  })()
-  : 'https://downlink-mob.onrender.com';
+// Backend API URL - hosted on Render
+const API_BASE = 'https://downlink-mob.onrender.com';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type DownloadStatus =

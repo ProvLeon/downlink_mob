@@ -208,6 +208,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   actionsContainer: {
+    flexDirection: 'row',
+    gap: 12,
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
