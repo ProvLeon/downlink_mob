@@ -1,0 +1,10 @@
+- [x] Strip out old Lynx codebase
+- [x] Initialize new Expo app
+- [x] Refactor core navigation with `expo-router`
+- [x] Build premium UI for Queue, Completed, and Settings screens
+- [x] Create native modal for adding new downloads
+- [x] Provide a mock state service to test UI interactivity
+- [x] Setup native Rust/yt-dlp integration bridge
+- [x] Finalize background service downloads
+- [x] Incorporate local file system bindings using `expo-file-system`.
+- [x] Establish settings sync mechanisms.
