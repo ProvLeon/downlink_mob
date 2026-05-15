@@ -13,7 +13,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryAddUsageDescription": "Downlink needs permission to save downloaded videos to your library.",
-        "NSPhotoLibraryUsageDescription": "Downlink needs access to your library to save and share videos."
+        "NSPhotoLibraryUsageDescription": "Downlink needs access to your library to save and share videos.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

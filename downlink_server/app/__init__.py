@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import info, formats, stream, health
+from .routers import formats, health, info, merge, stream
 
 
 def create_app() -> FastAPI:
@@ -26,5 +26,6 @@ def create_app() -> FastAPI:
     app.include_router(info.router, prefix="/api", tags=["Info"])
     app.include_router(formats.router, prefix="/api", tags=["Formats"])
     app.include_router(stream.router, prefix="/api", tags=["Stream"])
+    app.include_router(merge.router, prefix="/api", tags=["Merge"])
 
     return app

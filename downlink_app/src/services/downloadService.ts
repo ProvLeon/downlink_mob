@@ -3,22 +3,24 @@
  *
  * Full download flow:
  *  1. Call /api/formats on the Downlink backend (cheap — just JSON metadata)
- *  2. Download video (+ audio if separate) directly from YouTube CDN to app cache
- *  3. If needs_merge → merge with ffmpeg-kit-react-native
- *  4. Save final file to device gallery via expo-media-library
- *  5. Notify subscribers so the UI updates in real-time
+ *  2. For merged files (video + audio):
+ *     - Call /api/merge with the two stream URLs, backend handles FFmpeg
+ *     - Save merged file to device gallery
+ *  3. For single stream (video or audio only):
+ *     - Download directly from YouTube CDN to app cache
+ *     - Save to device gallery
+ *  4. Notify subscribers so the UI updates in real-time
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
-import { FFmpegKit, ReturnCode } from 'ffmpeg-kit-react-native';
 import { FORMAT_PRESETS } from '../types/index';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 // Change this to your deployed Railway/Fly.io URL in production
 const API_BASE = __DEV__
   ? 'http://localhost:8000'
-  : 'https://your-downlink-server.railway.app';
+  : 'https://downlink-mob.onrender.com';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export type DownloadStatus =
@@ -180,32 +182,55 @@ async function _runDownload(id: string, url: string, presetId: string) {
     let finalUri: string;
 
     if (streamInfo.needs_merge && streamInfo.video_url && streamInfo.audio_url) {
-      // Step 2a: Download video stream
-      const videoPath = cacheDir + `video.${streamInfo.ext}`;
-      await _downloadFile(id, streamInfo.video_url, videoPath, 0, 60);
-
-      // Step 2b: Download audio stream
-      const audioPath = cacheDir + `audio.m4a`;
-      await _downloadFile(id, streamInfo.audio_url, audioPath, 60, 90);
-
-      // Step 3: Merge with ffmpeg-kit
+      // Step 2: Call backend merge endpoint (handles FFmpeg on server)
       update(id, { status: 'merging', progress: 90, speed: undefined });
-      const mergedPath = cacheDir + `merged.${streamInfo.ext}`;
 
-      const session = await FFmpegKit.execute(
-        `-i "${videoPath}" -i "${audioPath}" -c:v copy -c:a aac -y "${mergedPath}"`,
-      );
-      const returnCode = await session.getReturnCode();
+      try {
+        const mergeRes = await fetch(`${API_BASE}/api/merge`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            video_url: streamInfo.video_url,
+            audio_url: streamInfo.audio_url,
+            ext: streamInfo.ext,
+          }),
+        });
 
-      if (!ReturnCode.isSuccess(returnCode)) {
-        throw new Error('ffmpeg merge failed');
+        if (!mergeRes.ok) {
+          const err = await mergeRes.json().catch(() => ({}));
+          throw new Error(
+            err.detail || `Backend merge failed: ${mergeRes.status}`
+          );
+        }
+
+        // Backend returns binary merged file
+        const mergedBlob = await mergeRes.blob();
+        const mergedPath = cacheDir + `merged.${streamInfo.ext}`;
+
+        // Write blob to file system using base64
+        const reader = new FileReader();
+        await new Promise<void>((resolve, reject) => {
+          reader.onload = async () => {
+            try {
+              const base64 = (reader.result as string).split(',')[1];
+              await FileSystem.writeAsStringAsync(mergedPath, base64, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(mergedBlob);
+        });
+
+        finalUri = mergedPath;
+      } catch (err: any) {
+        throw new Error(
+          `Merge error: ${err.message || String(err)}`
+        );
       }
-
-      // Clean up partial files
-      await FileSystem.deleteAsync(videoPath, { idempotent: true });
-      await FileSystem.deleteAsync(audioPath, { idempotent: true });
-
-      finalUri = mergedPath;
     } else {
       // Step 2: Single stream (merged or audio-only)
       const cdnUrl = streamInfo.video_url ?? streamInfo.audio_url ?? '';
@@ -214,7 +239,7 @@ async function _runDownload(id: string, url: string, presetId: string) {
       finalUri = filePath;
     }
 
-    // Step 4: Save to device gallery
+    // Step 3: Save to device gallery
     update(id, { status: 'saving', progress: 97 });
 
     const { status: permStatus } = await MediaLibrary.requestPermissionsAsync();
@@ -235,7 +260,7 @@ async function _runDownload(id: string, url: string, presetId: string) {
       eta: undefined,
     });
   } catch (err: any) {
-    await FileSystem.deleteAsync(cacheDir, { idempotent: true }).catch(() => {});
+    await FileSystem.deleteAsync(cacheDir, { idempotent: true }).catch(() => { });
     update(id, { status: 'failed', error: err.message ?? 'Download failed' });
   }
 }
