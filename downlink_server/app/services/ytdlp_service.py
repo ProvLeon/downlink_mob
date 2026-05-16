@@ -6,6 +6,10 @@ and direct CDN stream URLs. All heavy lifting (the actual video bytes)
 travels directly from the CDN to the user's device.
 """
 
+import base64
+import os
+import shutil
+import tempfile
 from typing import Any, Dict, Optional
 
 import yt_dlp
@@ -38,13 +42,6 @@ class _QuietLogger:
             print(f"yt-dlp error: {msg}")
 
 
-import base64
-import os
-import tempfile
-from typing import Any, Dict, Optional
-
-import yt_dlp
-
 # ---------------------------------------------------------------------------
 # Cookie Management for Bot Bypass
 # ---------------------------------------------------------------------------
@@ -53,10 +50,10 @@ _TEMP_COOKIE_FILE = None
 
 def _get_cookie_path() -> Optional[str]:
     """
-    Returns the path to a valid cookie file.
+    Returns the path to a valid, writable cookie file.
     Priority:
     1. YTDLP_COOKIES_BASE64 (encoded content in env)
-    2. YTDLP_COOKIEFILE (path in env)
+    2. YTDLP_COOKIEFILE (path in env, copied to writable /tmp if needed)
     3. cookies.txt in project root
     """
     global _TEMP_COOKIE_FILE
@@ -65,9 +62,8 @@ def _get_cookie_path() -> Optional[str]:
     encoded_cookies = os.environ.get("YTDLP_COOKIES_BASE64")
     if encoded_cookies:
         try:
-            if _TEMP_COOKIE_FILE is None:
-                # Create a persistent temp file for the session
-                fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_")
+            if _TEMP_COOKIE_FILE is None or not os.path.exists(_TEMP_COOKIE_FILE):
+                fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_b64_")
                 with os.fdopen(fd, "wb") as f:
                     f.write(base64.b64decode(encoded_cookies))
                 _TEMP_COOKIE_FILE = path
@@ -76,10 +72,25 @@ def _get_cookie_path() -> Optional[str]:
         except Exception as e:
             print(f"[BotBypass] Error decoding YTDLP_COOKIES_BASE64: {e}")
 
-    # 2. Check for explicit path
+    # 2. Check for explicit path (Render Secret File)
+    # Render mounts secrets at /etc/secrets which is READ-ONLY.
+    # yt-dlp tries to WRITE to the cookie file to update session tokens.
+    # We MUST copy it to /tmp to make it writable.
     cookie_file_path = os.environ.get("YTDLP_COOKIEFILE")
     if cookie_file_path and os.path.exists(cookie_file_path):
-        return cookie_file_path
+        try:
+            if _TEMP_COOKIE_FILE is None or not os.path.exists(_TEMP_COOKIE_FILE):
+                fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_writable_")
+                os.close(fd)  # Just need the path
+                shutil.copy2(cookie_file_path, path)
+                _TEMP_COOKIE_FILE = path
+                print(
+                    f"[BotBypass] Read-only cookie copied to writable path: {_TEMP_COOKIE_FILE}"
+                )
+            return _TEMP_COOKIE_FILE
+        except Exception as e:
+            print(f"[BotBypass] Error copying cookie to writable path: {e}")
+            return cookie_file_path  # Fallback to original and hope for the best
 
     # 3. Check for default file
     if os.path.exists("cookies.txt"):
