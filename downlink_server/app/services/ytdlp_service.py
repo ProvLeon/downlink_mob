@@ -17,11 +17,12 @@ import yt_dlp
 # ---------------------------------------------------------------------------
 # Preset → yt-dlp format selector mapping
 # ---------------------------------------------------------------------------
+# Resilient selectors: prefer mp4 but fallback to any codec if needed
 FORMAT_SELECTORS: Dict[str, str] = {
-    "mp4_best": "bv*+ba/b",
-    "mp4_1080p": "bv*[height<=1080]+ba/b[height<=1080]",
-    "mp4_720p": "bv*[height<=720]+ba/b[height<=720]",
-    "mp4_480p": "bv*[height<=480]+ba/b[height<=480]",
+    "mp4_best": "bv+ba/b",
+    "mp4_1080p": "bv[height<=1080]+ba/b[height<=1080]",
+    "mp4_720p": "bv[height<=720]+ba/b[height<=720]",
+    "mp4_480p": "bv[height<=480]+ba/b[height<=480]",
     "audio_mp3": "ba[ext=mp3]/ba/b",
     "audio_aac": "ba[ext=m4a]/ba/b",
     "audio_opus": "ba[ext=opus]/ba/b",
@@ -51,10 +52,6 @@ _TEMP_COOKIE_FILE = None
 def _get_cookie_path() -> Optional[str]:
     """
     Returns the path to a valid, writable cookie file.
-    Priority:
-    1. YTDLP_COOKIES_BASE64 (encoded content in env)
-    2. YTDLP_COOKIEFILE (path in env, copied to writable /tmp if needed)
-    3. cookies.txt in project root
     """
     global _TEMP_COOKIE_FILE
 
@@ -73,24 +70,19 @@ def _get_cookie_path() -> Optional[str]:
             print(f"[BotBypass] Error decoding YTDLP_COOKIES_BASE64: {e}")
 
     # 2. Check for explicit path (Render Secret File)
-    # Render mounts secrets at /etc/secrets which is READ-ONLY.
-    # yt-dlp tries to WRITE to the cookie file to update session tokens.
-    # We MUST copy it to /tmp to make it writable.
     cookie_file_path = os.environ.get("YTDLP_COOKIEFILE")
     if cookie_file_path and os.path.exists(cookie_file_path):
         try:
             if _TEMP_COOKIE_FILE is None or not os.path.exists(_TEMP_COOKIE_FILE):
                 fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_writable_")
-                os.close(fd)  # Just need the path
+                os.close(fd)
                 shutil.copy2(cookie_file_path, path)
                 _TEMP_COOKIE_FILE = path
-                print(
-                    f"[BotBypass] Read-only cookie copied to writable path: {_TEMP_COOKIE_FILE}"
-                )
+                print(f"[BotBypass] Read-only cookie copied to: {_TEMP_COOKIE_FILE}")
             return _TEMP_COOKIE_FILE
         except Exception as e:
-            print(f"[BotBypass] Error copying cookie to writable path: {e}")
-            return cookie_file_path  # Fallback to original and hope for the best
+            print(f"[BotBypass] Error copying cookie: {e}")
+            return cookie_file_path
 
     # 3. Check for default file
     if os.path.exists("cookies.txt"):
@@ -99,48 +91,53 @@ def _get_cookie_path() -> Optional[str]:
     return None
 
 
-# Base options — never download, always quiet
-_BASE_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "skip_download": True,
-    "noplaylist": True,
-    "logger": _QuietLogger(),
-    # Advanced bot detection bypass options
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["android", "ios", "web", "mweb"],
-            "player_skip": ["js"],
-            "include_dash_manifest": False,
-        }
-    },
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Dest": "document",
-        "Referer": "https://www.google.com/",
-    },
-    "socket_timeout": 30,
-    "nocheckcertificate": True,
-    "geo_bypass": True,
-}
-
-# Apply proxy if configured
-proxy = os.environ.get("YTDLP_PROXY")
-if proxy:
-    _BASE_OPTS["proxy"] = proxy
+# ---------------------------------------------------------------------------
+# Configuration Generator (Fixes nested dict overwrite bug)
+# ---------------------------------------------------------------------------
 
 
-def _make_opts(extra: dict = {}) -> dict:
-    opts = {**_BASE_OPTS, **extra}
+def _get_opts(player_client: str = "android", format_selector: str = None) -> dict:
+    """
+    Generate yt-dlp options with full bot-bypass arguments.
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "logger": _QuietLogger(),
+        "socket_timeout": 30,
+        "nocheckcertificate": True,
+        "geo_bypass": True,
+        # Advanced Bot Detection Bypass
+        "extractor_args": {
+            "youtube": {
+                "player_client": [player_client],
+                "player_skip": ["js"],
+                "include_dash_manifest": False,
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Fetch-Mode": "navigate",
+            "Referer": "https://www.google.com/",
+        },
+    }
 
-    # Always try to inject cookies if available
+    if format_selector:
+        opts["format"] = format_selector
+
+    # Apply cookie file if available
     cp = _get_cookie_path()
     if cp:
         opts["cookiefile"] = cp
+
+    # Apply proxy if configured
+    proxy = os.environ.get("YTDLP_PROXY")
+    if proxy:
+        opts["proxy"] = proxy
 
     return opts
 
@@ -153,20 +150,13 @@ def _make_opts(extra: dict = {}) -> dict:
 def get_video_info(url: str) -> Dict[str, Any]:
     """
     Return full metadata + all available formats for a URL.
-    Format objects include the direct CDN `url` field.
     """
-    # Try multiple times with different player clients
-    # Prioritise mobile/API clients which are less likely to trigger web CAPTCHAs
     player_clients = ["android", "ios", "mweb", "web"]
     last_error = None
 
-    for player_client in player_clients:
+    for client in player_clients:
         try:
-            opts = _make_opts(
-                {
-                    "extractor_args": {"youtube": {"player_client": [player_client]}},
-                }
-            )
+            opts = _get_opts(player_client=client)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 return ydl.sanitize_info(info)
@@ -174,43 +164,34 @@ def get_video_info(url: str) -> Dict[str, Any]:
             last_error = e
             continue
 
-    raise last_error or Exception("Failed to extract video info after retries")
+    raise last_error or Exception("Failed to extract video info")
 
 
 def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
     """
-    Resolve best video + audio CDN URLs with retry logic for YouTube bot detection.
+    Resolve best video + audio CDN URLs with retry logic for bot bypass.
     """
     selector = FORMAT_SELECTORS.get(preset, FORMAT_SELECTORS["mp4_720p"])
     is_audio_only = preset.startswith("audio_")
     ext = _ext_for_preset(preset)
 
-    # Try multiple player clients to bypass YouTube bot detection.
-    # Prioritise mobile/API clients which are less likely to trigger web CAPTCHAs
     player_clients = ["android", "ios", "mweb", "web"]
     last_error = None
 
-    for player_client in player_clients:
+    for client in player_clients:
         try:
-            opts = _make_opts(
-                {
-                    "format": selector,
-                    "extractor_args": {"youtube": {"player_client": [player_client]}},
-                }
-            )
-
+            opts = _get_opts(player_client=client, format_selector=selector)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
 
-            # Process the info and return
             requested = info.get("requested_formats")
 
             if requested and len(requested) == 2:
-                video_stream = requested[0]
-                audio_stream = requested[1]
+                v_stream = requested[0]
+                a_stream = requested[1]
                 return {
-                    "video_url": video_stream.get("url"),
-                    "audio_url": audio_stream.get("url"),
+                    "video_url": v_stream.get("url"),
+                    "audio_url": a_stream.get("url"),
                     "merged": False,
                     "needs_merge": True,
                     "ext": ext,
@@ -218,13 +199,13 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
                     "thumbnail": info.get("thumbnail"),
                     "filesize_approx": (
                         (
-                            video_stream.get("filesize")
-                            or video_stream.get("filesize_approx")
+                            v_stream.get("filesize")
+                            or v_stream.get("filesize_approx")
                             or 0
                         )
                         + (
-                            audio_stream.get("filesize")
-                            or audio_stream.get("filesize_approx")
+                            a_stream.get("filesize")
+                            or a_stream.get("filesize_approx")
                             or 0
                         )
                     )
@@ -245,7 +226,7 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
             last_error = e
             continue
 
-    raise last_error or Exception("Failed to extract stream URLs after retries")
+    raise last_error or Exception("Failed to extract stream URLs")
 
 
 def get_formats_list(url: str) -> list:
