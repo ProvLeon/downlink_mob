@@ -1,0 +1,149 @@
+import { View, Text, FlatList, Pressable, Image } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Play, Pause, Trash2, RotateCcw, DownloadCloud } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { DownloadService, DownloadItem } from '../../src/services/downloadService';
+
+export default function QueueScreen() {
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = DownloadService.subscribe((data) => {
+      setDownloads(data.filter(d => d.status !== 'completed'));
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleRetry = (item: DownloadItem) => {
+    // To retry, we remove and re-add or just call addDownload with same URL
+    DownloadService.removeDownload(item.id);
+    DownloadService.addDownload(item.url, item.preset.id);
+  };
+
+  const renderItem = ({ item }: { item: DownloadItem }) => (
+    <View className="bg-slate-800/40 border border-slate-700/50 rounded-3xl p-4 mb-4 overflow-hidden">
+      <View className="flex-row items-center mb-4">
+        {item.thumbnail ? (
+          <Image source={{ uri: item.thumbnail }} className="w-16 h-16 rounded-xl bg-slate-900 mr-4" />
+        ) : (
+          <View className="w-16 h-16 rounded-xl bg-slate-900 mr-4 items-center justify-center">
+            <Image source={require('../../assets/downlink.png')} className="w-6 h-6 opacity-30" resizeMode="contain" />
+          </View>
+        )}
+        <View className="flex-1">
+          <Text className="text-slate-100 font-bold text-base leading-tight mb-2" numberOfLines={2}>{item.title}</Text>
+          <View className="flex-row items-center gap-2">
+            <View className="bg-sky-500/10 px-2 py-0.5 rounded-md border border-sky-500/20">
+              <Text className="text-sky-400 text-[10px] font-bold uppercase tracking-wider">{item.preset.label}</Text>
+            </View>
+            <Text className="text-slate-400 text-[11px] font-medium italic">
+              {item.status === 'downloading' ? item.speed ?? 'Downloading…'
+                : item.status === 'paused' ? 'Paused'
+                  : item.status === 'fetching_info' ? 'Fetching info…'
+                    : item.status === 'merging' ? 'Merging streams…'
+                      : item.status === 'saving' ? 'Saving…'
+                        : item.status === 'failed' ? 'Failed'
+                          : 'Pending…'}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View className="mb-4">
+        <View className="h-2 bg-slate-900 rounded-full overflow-hidden mb-2">
+          <View
+            className={`h-full rounded-full ${item.status === 'failed' ? 'bg-rose-500' : 'bg-sky-500'}`}
+            style={{ width: `${item.progress}%` }}
+          />
+        </View>
+        <View className="flex-row justify-between">
+          <Text className="text-slate-500 text-[11px] font-bold">{Math.round(item.progress)}%</Text>
+          <Text className="text-slate-500 text-[11px] font-bold">{item.eta ? `ETA: ${item.eta}` : ''}</Text>
+        </View>
+      </View>
+
+      {item.status === 'failed' && (
+        <View className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-3 mb-4">
+          <Text className="text-rose-400 text-[11px] leading-tight" numberOfLines={2}>
+            Error: {item.error ?? 'Unknown error occurred'}
+          </Text>
+        </View>
+      )}
+
+      <View className="flex-row gap-2 pt-4 border-t border-slate-700/30">
+        {item.status === 'downloading' ? (
+          <Pressable
+            className="flex-1 flex-row items-center justify-center py-2.5 rounded-xl bg-amber-500/10 active:opacity-70"
+            onPress={() => DownloadService.pauseDownload(item.id)}
+          >
+            <Pause size={16} color="#f59e0b" />
+            <Text className="text-amber-500 text-xs font-bold ml-2">Pause</Text>
+          </Pressable>
+        ) : item.status === 'paused' ? (
+          <Pressable
+            className="flex-1 flex-row items-center justify-center py-2.5 rounded-xl bg-emerald-500/10 active:opacity-70"
+            onPress={() => DownloadService.resumeDownload(item.id)}
+          >
+            <Play size={16} color="#10b981" />
+            <Text className="text-emerald-500 text-xs font-bold ml-2">Resume</Text>
+          </Pressable>
+        ) : item.status === 'failed' ? (
+          <Pressable
+            className="flex-1 flex-row items-center justify-center py-2.5 rounded-xl bg-sky-500/10 active:opacity-70"
+            onPress={() => handleRetry(item)}
+          >
+            <RotateCcw size={16} color="#0ea5e9" />
+            <Text className="text-sky-400 text-xs font-bold ml-2">Retry</Text>
+          </Pressable>
+        ) : (
+          <View className="flex-1 flex-row items-center justify-center py-2.5 rounded-xl bg-slate-700/20 opacity-50">
+            <Text className="text-slate-500 text-xs font-bold italic">Processing…</Text>
+          </View>
+        )}
+
+        <Pressable
+          className="w-12 items-center justify-center rounded-xl bg-slate-700/20 active:bg-rose-500/10"
+          onPress={() => DownloadService.removeDownload(item.id)}
+        >
+          <Trash2 size={16} color="#94a3b8" />
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView className="flex-1 bg-slate-950">
+      <View className="px-6 pt-8 pb-4">
+        <View className="flex-row items-center gap-4">
+          <View className="w-12 h-12 bg-slate-900 rounded-2xl items-center justify-center border border-slate-800">
+            <DownloadCloud size={24} color="#38bdf8" />
+          </View>
+          <View>
+            <Text className="text-3xl font-black text-slate-100 tracking-tighter">Queue</Text>
+            <Text className="text-slate-500 text-sm font-medium">{downloads.length} active tasks</Text>
+          </View>
+        </View>
+      </View>
+
+      {downloads.length === 0 ? (
+        <View className="flex-1 justify-center items-center px-10">
+          <View className="w-24 h-24 rounded-full bg-slate-900/50 items-center justify-center mb-6 border border-slate-800/50">
+            <DownloadCloud size={40} color="#334155" />
+          </View>
+          <Text className="text-xl font-bold text-slate-300 mb-2 text-center">Queue Clear</Text>
+          <Text className="text-slate-500 text-center leading-relaxed">
+            Ready for your next download. Paste a link to get started.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={downloads}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+    </SafeAreaView>
+  );
+}

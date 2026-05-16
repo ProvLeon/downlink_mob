@@ -23,14 +23,30 @@ FORMAT_SELECTORS: Dict[str, str] = {
     "audio_opus": "ba[ext=opus]/ba/b",
 }
 
+
+class _QuietLogger:
+    def debug(self, msg):
+        pass
+
+    def warning(self, msg):
+        pass
+
+    def error(self, msg):
+        # Only log errors if they are not the common "format not available" ones
+        # which we expect during retries
+        if "Requested format is not available" not in msg:
+            print(f"yt-dlp error: {msg}")
+
+
 # Base options — never download, always quiet
 _BASE_OPTS = {
     "quiet": True,
     "no_warnings": True,
     "skip_download": True,
     "noplaylist": True,
+    "logger": _QuietLogger(),
     # YouTube bot detection bypass options
-    "extractor_args": "youtube:player_client=web",
+    "extractor_args": {"youtube": {"player_client": ["web"]}},
     "socket_timeout": 30,
 }
 
@@ -57,7 +73,7 @@ def get_video_info(url: str) -> Dict[str, Any]:
         try:
             opts = _make_opts(
                 {
-                    "extractor_args": f"youtube:player_client={player_client}",
+                    "extractor_args": {"youtube": {"player_client": [player_client]}},
                 }
             )
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -87,7 +103,7 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
             opts = _make_opts(
                 {
                     "format": selector,
-                    "extractor_args": f"youtube:player_client={player_client}",
+                    "extractor_args": {"youtube": {"player_client": [player_client]}},
                 }
             )
 

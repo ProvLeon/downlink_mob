@@ -14,13 +14,16 @@
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FORMAT_PRESETS } from '../types/index';
+import { DownlinkFileSystem } from './fileSystem';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
+export const STORAGE_KEY = '@downlink_downloads';
 // Dynamic API URL based on environment
 // Development: Use local backend (http://localhost:8000)
 // Production: Use Render backend (https://downlink-mob.onrender.com)
-const API_BASE = __DEV__
+export const API_BASE = __DEV__
   ? 'http://localhost:8000'
   : 'https://downlink-mob.onrender.com';
 
@@ -50,6 +53,7 @@ export interface DownloadItem {
   error?: string;
   localUri?: string;      // Final gallery URI once completed
   needsMerge?: boolean;
+  createdAt: number;
 }
 
 type Listener = (items: DownloadItem[]) => void;
@@ -58,7 +62,13 @@ type Listener = (items: DownloadItem[]) => void;
 let _downloads: DownloadItem[] = [];
 let _listeners: Listener[] = [];
 
-const notify = () => _listeners.forEach((l) => l([..._downloads]));
+const notify = () => {
+  _listeners.forEach((l) => l([..._downloads]));
+  // Persist to storage
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(_downloads)).catch(err => {
+    console.error('[DownloadService] Failed to save downloads:', err);
+  });
+};
 
 const update = (id: string, patch: Partial<DownloadItem>) => {
   _downloads = _downloads.map((d) => (d.id === id ? { ...d, ...patch } : d));
@@ -70,6 +80,24 @@ const _activeDownloads = new Map<string, FileSystem.DownloadResumable>();
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 export const DownloadService = {
+  async init() {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        _downloads = JSON.parse(stored);
+        // Reset any stuck states on boot
+        _downloads = _downloads.map(d =>
+          (d.status === 'downloading' || d.status === 'merging' || d.status === 'fetching_info' || d.status === 'saving')
+            ? { ...d, status: 'failed', error: 'Interrupted' }
+            : d
+        );
+      }
+      notify();
+    } catch (err) {
+      console.error('[DownloadService] Init failed:', err);
+    }
+  },
+
   subscribe(listener: Listener) {
     _listeners.push(listener);
     listener([..._downloads]);
@@ -93,6 +121,7 @@ export const DownloadService = {
       progress: 0,
       status: 'pending',
       preset,
+      createdAt: Date.now(),
     };
 
     _downloads = [item, ..._downloads];
@@ -124,6 +153,13 @@ export const DownloadService = {
   },
 
   removeDownload(id: string) {
+    const item = _downloads.find(d => d.id === id);
+    if (item?.localUri) {
+      FileSystem.deleteAsync(item.localUri, { idempotent: true }).catch(err => {
+        console.warn('[DownloadService] Failed to delete local file:', err);
+      });
+    }
+
     const resumable = _activeDownloads.get(id);
     if (resumable) resumable.cancelAsync();
     _activeDownloads.delete(id);
@@ -254,15 +290,25 @@ async function _runDownload(id: string, url: string, presetId: string) {
       finalUri = filePath;
     }
 
-    // Step 3: Save to device gallery
+    // Step 3: Save to permanent storage AND gallery
     update(id, { status: 'saving', progress: 97 });
 
-    const { status: permStatus } = await MediaLibrary.requestPermissionsAsync();
-    if (permStatus !== 'granted') {
-      throw new Error('Gallery permission denied');
-    }
+    const downlinkDir = await DownlinkFileSystem.initialize();
+    const fileName = `${id}_${streamInfo.title.replace(/[^a-z0-9]/gi, '_').substring(0, 50)}.${streamInfo.ext}`;
+    const permanentPath = downlinkDir + fileName;
 
-    const asset = await MediaLibrary.createAssetAsync(finalUri);
+    // Copy from cache to permanent storage
+    await FileSystem.copyAsync({ from: finalUri, to: permanentPath });
+
+    // Also save to gallery for user convenience
+    const { status: permStatus } = await MediaLibrary.requestPermissionsAsync();
+    if (permStatus === 'granted') {
+      try {
+        await MediaLibrary.createAssetAsync(permanentPath);
+      } catch (galleryErr) {
+        console.warn('[DownloadService] Failed to save to gallery:', galleryErr);
+      }
+    }
 
     // Clean up cache
     await FileSystem.deleteAsync(cacheDir, { idempotent: true });
@@ -270,7 +316,7 @@ async function _runDownload(id: string, url: string, presetId: string) {
     update(id, {
       status: 'completed',
       progress: 100,
-      localUri: asset.uri,
+      localUri: permanentPath, // Use the stable file:// URI
       speed: undefined,
       eta: undefined,
     });
