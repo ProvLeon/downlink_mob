@@ -1,0 +1,50 @@
+name: Android Release Build
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK via EAS Cloud
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🏗 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: 🏗 Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 📦 Install dependencies
+        run: |
+          cd downlink_app
+          bun install
+
+      - name: 🚀 Build and Download APK
+        run: |
+          cd downlink_app
+          eas build --platform android --profile apk --non-interactive --wait --output ./downlink-android.apk
+
+      - name: 📤 Upload Artifact to GitHub Action
+        uses: actions/upload-artifact@v4
+        with:
+          name: downlink-apk
+          path: downlink_app/downlink-android.apk
+
+      - name: 🚀 Attach APK to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: downlink_app/downlink-android.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
