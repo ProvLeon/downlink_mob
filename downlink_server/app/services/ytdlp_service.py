@@ -17,7 +17,6 @@ import yt_dlp
 # ---------------------------------------------------------------------------
 # Preset → yt-dlp format selector mapping
 # ---------------------------------------------------------------------------
-# Resilient selectors: prefer mp4 but fallback to any codec if needed
 FORMAT_SELECTORS: Dict[str, str] = {
     "mp4_best": "bv+ba/b",
     "mp4_1080p": "bv[height<=1080]+ba/b[height<=1080]",
@@ -37,8 +36,6 @@ class _QuietLogger:
         pass
 
     def error(self, msg):
-        # Only log errors if they are not the common "format not available" ones
-        # which we expect during retries
         if "Requested format is not available" not in msg:
             print(f"yt-dlp error: {msg}")
 
@@ -92,14 +89,22 @@ def _get_cookie_path() -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Configuration Generator (Fixes nested dict overwrite bug)
+# Configuration Generator (Aggressive Bot Bypass)
 # ---------------------------------------------------------------------------
 
 
-def _get_opts(player_client: str = "android", format_selector: str = None) -> dict:
+def _get_opts(player_client: str = "web", format_selector: str = None) -> dict:
     """
-    Generate yt-dlp options with full bot-bypass arguments.
+    Generate options with client-specific headers and minimal footprint.
     """
+    # High-fidelity User Agents
+    ua_map = {
+        "android": "com.google.android.youtube/19.05.36 (Linux; U; Android 14; en_US) gzip",
+        "ios": "com.google.ios.youtube/19.05.36 (iPhone16,2; U; CPU iPhone OS 17_3 like Mac OS X; en_US)",
+        "web": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "mweb": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+    }
+
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -109,32 +114,28 @@ def _get_opts(player_client: str = "android", format_selector: str = None) -> di
         "socket_timeout": 30,
         "nocheckcertificate": True,
         "geo_bypass": True,
-        # Advanced Bot Detection Bypass
+        # Ghost Extraction Strategy: Minimize handshakes
+        "check_formats": False,
+        "youtube_include_dash_manifest": False,
+        "youtube_include_hls_manifest": False,
+        "youtube_include_video_remux_manifest": False,
+        "lazy_extractors": True,
         "extractor_args": {
             "youtube": {
                 "player_client": [player_client],
-                "player_skip": ["js"],
-                "include_dash_manifest": False,
+                "player_skip": ["js", "web_money", "configs"],
             }
         },
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Sec-Fetch-Mode": "navigate",
-            "Referer": "https://www.google.com/",
-        },
+        "user_agent": ua_map.get(player_client, ua_map["web"]),
     }
 
     if format_selector:
         opts["format"] = format_selector
 
-    # Apply cookie file if available
     cp = _get_cookie_path()
     if cp:
         opts["cookiefile"] = cp
 
-    # Apply proxy if configured
     proxy = os.environ.get("YTDLP_PROXY")
     if proxy:
         opts["proxy"] = proxy
@@ -151,7 +152,8 @@ def get_video_info(url: str) -> Dict[str, Any]:
     """
     Return full metadata + all available formats for a URL.
     """
-    player_clients = ["android", "ios", "mweb", "web"]
+    # Pivot to Web/MWeb first as mobile clients are hitting 'format not available' on Render
+    player_clients = ["web", "mweb", "android", "ios"]
     last_error = None
 
     for client in player_clients:
@@ -162,20 +164,26 @@ def get_video_info(url: str) -> Dict[str, Any]:
                 return ydl.sanitize_info(info)
         except Exception as e:
             last_error = e
+            if "Sign in to confirm" in str(
+                e
+            ) or "Requested format is not available" in str(e):
+                continue
+            if "not found" in str(e).lower():
+                break
             continue
 
-    raise last_error or Exception("Failed to extract video info")
+    raise last_error or Exception("Access denied by YouTube bot detection")
 
 
 def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
     """
-    Resolve best video + audio CDN URLs with retry logic for bot bypass.
+    Resolve best video + audio CDN URLs with aggressive retry logic.
     """
     selector = FORMAT_SELECTORS.get(preset, FORMAT_SELECTORS["mp4_720p"])
     is_audio_only = preset.startswith("audio_")
     ext = _ext_for_preset(preset)
 
-    player_clients = ["android", "ios", "mweb", "web"]
+    player_clients = ["web", "mweb", "android", "ios"]
     last_error = None
 
     for client in player_clients:
@@ -224,9 +232,13 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
             }
         except Exception as e:
             last_error = e
+            if "Sign in to confirm" in str(
+                e
+            ) or "Requested format is not available" in str(e):
+                continue
             continue
 
-    raise last_error or Exception("Failed to extract stream URLs")
+    raise last_error or Exception("Access denied by YouTube bot detection")
 
 
 def get_formats_list(url: str) -> list:
