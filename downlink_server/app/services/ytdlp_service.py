@@ -50,21 +50,30 @@ _BASE_OPTS = {
     # Advanced bot detection bypass options
     "extractor_args": {
         "youtube": {
-            "player_client": ["web", "mweb", "android"],
-            "player_skip": ["js"],  # Skip JS execution if possible
+            "player_client": ["android", "ios", "web", "mweb"],
+            "player_skip": ["js"],
+            "include_dash_manifest": False,
         }
     },
     "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Dest": "document",
+        "Referer": "https://www.google.com/",
     },
     "socket_timeout": 30,
     "nocheckcertificate": True,
+    "geo_bypass": True,
 }
 
-# Apply cookie file if configured in environment
+# Apply optional configurations from environment
+proxy = os.environ.get("YTDLP_PROXY")
+if proxy:
+    _BASE_OPTS["proxy"] = proxy
+
 cookie_file = os.environ.get("YTDLP_COOKIEFILE")
 if cookie_file and os.path.exists(cookie_file):
     _BASE_OPTS["cookiefile"] = cookie_file
