@@ -38,7 +38,55 @@ class _QuietLogger:
             print(f"yt-dlp error: {msg}")
 
 
+import base64
 import os
+import tempfile
+from typing import Any, Dict, Optional
+
+import yt_dlp
+
+# ---------------------------------------------------------------------------
+# Cookie Management for Bot Bypass
+# ---------------------------------------------------------------------------
+_TEMP_COOKIE_FILE = None
+
+
+def _get_cookie_path() -> Optional[str]:
+    """
+    Returns the path to a valid cookie file.
+    Priority:
+    1. YTDLP_COOKIES_BASE64 (encoded content in env)
+    2. YTDLP_COOKIEFILE (path in env)
+    3. cookies.txt in project root
+    """
+    global _TEMP_COOKIE_FILE
+
+    # 1. Check for Base64 encoded cookies in env
+    encoded_cookies = os.environ.get("YTDLP_COOKIES_BASE64")
+    if encoded_cookies:
+        try:
+            if _TEMP_COOKIE_FILE is None:
+                # Create a persistent temp file for the session
+                fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(base64.b64decode(encoded_cookies))
+                _TEMP_COOKIE_FILE = path
+                print(f"[BotBypass] Cookies hydrated from ENV to {_TEMP_COOKIE_FILE}")
+            return _TEMP_COOKIE_FILE
+        except Exception as e:
+            print(f"[BotBypass] Error decoding YTDLP_COOKIES_BASE64: {e}")
+
+    # 2. Check for explicit path
+    cookie_file_path = os.environ.get("YTDLP_COOKIEFILE")
+    if cookie_file_path and os.path.exists(cookie_file_path):
+        return cookie_file_path
+
+    # 3. Check for default file
+    if os.path.exists("cookies.txt"):
+        return "cookies.txt"
+
+    return None
+
 
 # Base options — never download, always quiet
 _BASE_OPTS = {
@@ -69,18 +117,21 @@ _BASE_OPTS = {
     "geo_bypass": True,
 }
 
-# Apply optional configurations from environment
+# Apply proxy if configured
 proxy = os.environ.get("YTDLP_PROXY")
 if proxy:
     _BASE_OPTS["proxy"] = proxy
 
-cookie_file = os.environ.get("YTDLP_COOKIEFILE")
-if cookie_file and os.path.exists(cookie_file):
-    _BASE_OPTS["cookiefile"] = cookie_file
-
 
 def _make_opts(extra: dict = {}) -> dict:
-    return {**_BASE_OPTS, **extra}
+    opts = {**_BASE_OPTS, **extra}
+
+    # Always try to inject cookies if available
+    cp = _get_cookie_path()
+    if cp:
+        opts["cookiefile"] = cp
+
+    return opts
 
 
 # ---------------------------------------------------------------------------
