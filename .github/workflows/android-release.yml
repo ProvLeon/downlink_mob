@@ -9,6 +9,7 @@ jobs:
   build:
     name: Build APK via EAS Cloud
     runs-on: ubuntu-latest
+    environment: EXPO_TOKEN
     steps:
       - name: 🏗 Checkout
         uses: actions/checkout@v4
