@@ -1,9 +1,10 @@
 FROM python:3.12-slim
 
-# Install ffmpeg + curl (needed for uv install)
+# Install ffmpeg + curl + ca-certificates (needed for uv install + TLS)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
