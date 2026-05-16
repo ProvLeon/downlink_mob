@@ -93,11 +93,11 @@ def _get_cookie_path() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def _get_opts(player_client: str = "android", format_selector: str = None) -> dict:
+def _get_opts(player_client: str = "web", format_selector: str = None) -> dict:
     """
-    Generate options with client-specific headers to bypass detection.
+    Generate options with client-specific headers and minimal footprint.
     """
-    # Map clients to their official User-Agents to prevent fingerprint mismatches
+    # High-fidelity User Agents
     ua_map = {
         "android": "com.google.android.youtube/19.05.36 (Linux; U; Android 14; en_US) gzip",
         "ios": "com.google.ios.youtube/19.05.36 (iPhone16,2; U; CPU iPhone OS 17_3 like Mac OS X; en_US)",
@@ -114,17 +114,19 @@ def _get_opts(player_client: str = "android", format_selector: str = None) -> di
         "socket_timeout": 30,
         "nocheckcertificate": True,
         "geo_bypass": True,
-        # Aggressive Bypass Settings
-        "check_formats": False,  # Speed up & reduce requests
+        # Ghost Extraction Strategy: Minimize handshakes
+        "check_formats": False,
         "youtube_include_dash_manifest": False,
         "youtube_include_hls_manifest": False,
+        "youtube_include_video_remux_manifest": False,
+        "lazy_extractors": True,
         "extractor_args": {
             "youtube": {
                 "player_client": [player_client],
-                "player_skip": ["js", "web_money"],
+                "player_skip": ["js", "web_money", "configs"],
             }
         },
-        "user_agent": ua_map.get(player_client, ua_map["android"]),
+        "user_agent": ua_map.get(player_client, ua_map["web"]),
     }
 
     if format_selector:
@@ -150,23 +152,22 @@ def get_video_info(url: str) -> Dict[str, Any]:
     """
     Return full metadata + all available formats for a URL.
     """
-    # Start with the most reliable clients
-    player_clients = ["android", "ios", "mweb", "web"]
+    # Pivot to Web/MWeb first as mobile clients are hitting 'format not available' on Render
+    player_clients = ["web", "mweb", "android", "ios"]
     last_error = None
 
     for client in player_clients:
         try:
             opts = _get_opts(player_client=client)
             with yt_dlp.YoutubeDL(opts) as ydl:
-                # Use download=False to just extract info
                 info = ydl.extract_info(url, download=False)
                 return ydl.sanitize_info(info)
         except Exception as e:
             last_error = e
-            # If it's a bot block, try the next client immediately
-            if "Sign in to confirm" in str(e):
+            if "Sign in to confirm" in str(
+                e
+            ) or "Requested format is not available" in str(e):
                 continue
-            # If the video itself is missing, no need to retry
             if "not found" in str(e).lower():
                 break
             continue
@@ -182,7 +183,7 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
     is_audio_only = preset.startswith("audio_")
     ext = _ext_for_preset(preset)
 
-    player_clients = ["android", "ios", "mweb", "web"]
+    player_clients = ["web", "mweb", "android", "ios"]
     last_error = None
 
     for client in player_clients:
@@ -219,7 +220,6 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
                     or None,
                 }
 
-            # Single stream fallback
             return {
                 "video_url": info.get("url") if not is_audio_only else None,
                 "audio_url": info.get("url") if is_audio_only else None,
@@ -232,7 +232,9 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
             }
         except Exception as e:
             last_error = e
-            if "Sign in to confirm" in str(e):
+            if "Sign in to confirm" in str(
+                e
+            ) or "Requested format is not available" in str(e):
                 continue
             continue
 
