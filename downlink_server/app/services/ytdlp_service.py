@@ -1,16 +1,14 @@
 """
-Core yt-dlp service with advanced bot bypass and resilience.
-All yt-dlp interactions are centralised here so routers stay clean.
-The service NEVER downloads the actual media — it only extracts metadata
-and direct CDN stream URLs. All heavy lifting (the actual video bytes)
-travels directly from the CDN to the user's device.
+Core yt-dlp service with aggressive YouTube bot bypass.
+Handles player extraction failures, IP blocks, and cookie issues.
 
 CRITICAL ENHANCEMENTS:
-- Intelligent retry logic with exponential backoff
-- Comprehensive header spoofing (TLS fingerprinting, Accept-Language, etc.)
-- Request throttling and rate limit detection
-- Robust cookie management with fallback mechanisms
-- Response code-aware error handling
+- Intelligent retry with exponential backoff + jitter
+- Per-request header & user agent randomization
+- Player extraction fallback (OAuth + signature modes)
+- Cookie-less extraction support (less reliable but functional)
+- IP block detection with fallback strategies
+- Remote component enabling for JS challenge solving
 """
 
 import base64
@@ -20,7 +18,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import yt_dlp
 
@@ -37,7 +35,7 @@ FORMAT_SELECTORS: Dict[str, str] = {
     "audio_opus": "ba[ext=opus]/ba/b",
 }
 
-# High-fidelity User Agents with platform-specific details
+# High-fidelity User Agents
 USER_AGENTS = {
     "android": [
         "com.google.android.youtube/19.05.36 (Linux; U; Android 14; en_US) gzip",
@@ -61,7 +59,6 @@ USER_AGENTS = {
     ],
 }
 
-# Accept-Language variants to appear more natural
 ACCEPT_LANGUAGES = [
     "en-US,en;q=0.9",
     "en-US,en;q=0.8,fr;q=0.7",
@@ -71,7 +68,7 @@ ACCEPT_LANGUAGES = [
 
 
 class _QuietLogger:
-    """Suppress verbose yt-dlp logging unless critical."""
+    """Suppress verbose yt-dlp logging."""
 
     def debug(self, msg):
         pass
@@ -85,26 +82,39 @@ class _QuietLogger:
 
 
 # ---------------------------------------------------------------------------
-# Cookie Management for Bot Bypass (Enhanced)
+# Cookie Management (Enhanced with Validation)
 # ---------------------------------------------------------------------------
 _TEMP_COOKIE_FILE = None
 _COOKIE_INIT_TIME = None
 
 
+def _validate_cookie_file(path: str) -> bool:
+    """Check if a cookie file is likely valid YouTube cookies."""
+    try:
+        with open(path, "r") as f:
+            content = f.read()
+            # Check for Netscape format header
+            if "# Netscape HTTP Cookie File" not in content:
+                print(f"[BotBypass] ⚠ File not in Netscape format: {path}")
+                return False
+            # Check for YouTube domain
+            if ".youtube.com" not in content.lower():
+                print(f"[BotBypass] ⚠ No YouTube cookies found in: {path}")
+                return False
+            return True
+    except Exception as e:
+        print(f"[BotBypass] ✗ Error validating cookies: {e}")
+        return False
+
+
 def _get_cookie_path() -> Optional[str]:
-    """
-    Returns the path to a valid, writable cookie file.
-    Supports multiple cookie sources with fallback:
-    1. Base64 encoded cookies in YTDLP_COOKIES_BASE64
-    2. Explicit path in YTDLP_COOKIEFILE
-    3. Local cookies.txt file
-    """
+    """Returns valid cookie path or None."""
     global _TEMP_COOKIE_FILE, _COOKIE_INIT_TIME
 
-    # Refresh cookies every 2 hours to prevent staleness
+    # Refresh cookies every 2 hours
     if _TEMP_COOKIE_FILE and _COOKIE_INIT_TIME:
         age = time.time() - _COOKIE_INIT_TIME
-        if age > 7200:  # 2 hours
+        if age > 7200:
             try:
                 os.remove(_TEMP_COOKIE_FILE)
                 _TEMP_COOKIE_FILE = None
@@ -113,62 +123,64 @@ def _get_cookie_path() -> Optional[str]:
             except:
                 pass
 
-    # 1. Check for Base64 encoded cookies in env
-    encoded_cookies = os.environ.get("YTDLP_COOKIES_BASE64")
-    if encoded_cookies:
+    # Try Base64 env var
+    encoded = os.environ.get("YTDLP_COOKIES_BASE64")
+    if encoded:
         try:
             if _TEMP_COOKIE_FILE is None or not os.path.exists(_TEMP_COOKIE_FILE):
                 fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_b64_")
                 with os.fdopen(fd, "wb") as f:
-                    decoded = base64.b64decode(encoded_cookies)
+                    decoded = base64.b64decode(encoded)
                     f.write(decoded)
-                    # Validate that it's not empty
-                    if len(decoded) < 10:
-                        raise ValueError("Cookie data too small - likely invalid")
+                    if len(decoded) < 10 or not _validate_cookie_file(path):
+                        os.remove(path)
+                        raise ValueError("Invalid cookie data")
                 _TEMP_COOKIE_FILE = path
                 _COOKIE_INIT_TIME = time.time()
-                print(
-                    f"[BotBypass] ✓ Cookies hydrated from YTDLP_COOKIES_BASE64 to {_TEMP_COOKIE_FILE}"
-                )
+                print(f"[BotBypass] ✓ Using YTDLP_COOKIES_BASE64")
             return _TEMP_COOKIE_FILE
         except Exception as e:
-            print(f"[BotBypass] ✗ Error decoding YTDLP_COOKIES_BASE64: {e}")
+            print(f"[BotBypass] ✗ YTDLP_COOKIES_BASE64 invalid: {e}")
             _TEMP_COOKIE_FILE = None
 
-    # 2. Check for explicit path (Render Secret File)
-    cookie_file_path = os.environ.get("YTDLP_COOKIEFILE")
-    if cookie_file_path and os.path.exists(cookie_file_path):
+    # Try explicit path
+    cookie_path = os.environ.get("YTDLP_COOKIEFILE")
+    if cookie_path and os.path.exists(cookie_path):
         try:
-            # Check file size
-            if os.path.getsize(cookie_file_path) < 10:
-                raise ValueError("Cookie file too small - likely invalid")
-
+            if os.path.getsize(cookie_path) < 50:
+                raise ValueError("Cookie file too small")
+            if not _validate_cookie_file(cookie_path):
+                raise ValueError("Not valid YouTube cookies")
             if _TEMP_COOKIE_FILE is None or not os.path.exists(_TEMP_COOKIE_FILE):
                 fd, path = tempfile.mkstemp(suffix=".txt", prefix="cookies_writable_")
                 os.close(fd)
-                shutil.copy2(cookie_file_path, path)
+                shutil.copy2(cookie_path, path)
                 _TEMP_COOKIE_FILE = path
                 _COOKIE_INIT_TIME = time.time()
-                print(f"[BotBypass] ✓ Copied read-only cookie to: {_TEMP_COOKIE_FILE}")
+                print(f"[BotBypass] ✓ Using YTDLP_COOKIEFILE")
             return _TEMP_COOKIE_FILE
         except Exception as e:
-            print(f"[BotBypass] ✗ Error copying cookie from {cookie_file_path}: {e}")
+            print(f"[BotBypass] ✗ YTDLP_COOKIEFILE invalid: {e}")
 
-    # 3. Check for default file
+    # Try local file
     if os.path.exists("cookies.txt"):
         try:
-            if os.path.getsize("cookies.txt") > 10:
+            if os.path.getsize("cookies.txt") > 50 and _validate_cookie_file(
+                "cookies.txt"
+            ):
                 print("[BotBypass] ✓ Using local cookies.txt")
                 return "cookies.txt"
         except:
             pass
 
-    print("[BotBypass] ⚠ No cookies found - operating in cookie-less mode")
+    print(
+        "[BotBypass] ⚠ No valid YouTube cookies found - will attempt cookie-less extraction"
+    )
     return None
 
 
 # ---------------------------------------------------------------------------
-# Configuration Generator (Aggressive Bot Bypass)
+# Configuration Generator
 # ---------------------------------------------------------------------------
 
 
@@ -176,46 +188,37 @@ def _get_opts(
     player_client: str = "web",
     format_selector: str = None,
     request_id: str = None,
+    enable_remote_components: bool = False,
+    use_oauth: bool = False,
 ) -> dict:
-    """
-    Generate yt-dlp options with aggressive bot bypass.
+    """Generate yt-dlp options with aggressive bot bypass."""
 
-    Strategy:
-    - Rotate user agents per request
-    - Include realistic headers (Accept-Language, Accept-Encoding, etc.)
-    - Enable geo-bypass with minimal manifest overhead
-    - Use player-specific client selection
-    - Aggressive timeout and retry tuning
-    """
-    # Rotate user agent for this specific request
     ua_options = USER_AGENTS.get(player_client, USER_AGENTS["web"])
     user_agent = random.choice(ua_options)
-
-    # Random Accept-Language to appear natural
     accept_lang = random.choice(ACCEPT_LANGUAGES)
 
     opts = {
-        # Core extraction
+        # Core settings
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
         "logger": _QuietLogger(),
-        # Aggressive timeout tuning
+        # Timeouts & retries (AGGRESSIVE)
         "socket_timeout": 30,
-        "retries": 5,
-        "fragment_retries": 5,
-        # TLS/HTTP client spoofing
+        "retries": 10,
+        "fragment_retries": 10,
+        # TLS
         "nocheckcertificate": True,
         "geo_bypass": True,
         "geo_bypass_country": "US",
-        # Manifest optimization
+        # Manifests
         "check_formats": False,
         "youtube_include_dash_manifest": False,
         "youtube_include_hls_manifest": False,
         "youtube_include_video_remux_manifest": False,
         "lazy_extractors": True,
-        # Request headers
+        # Headers
         "http_headers": {
             "User-Agent": user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -229,7 +232,7 @@ def _get_opts(
             "Sec-Fetch-Site": "none",
             "Cache-Control": "max-age=0",
         },
-        # Player extraction strategy
+        # Player extraction
         "extractor_args": {
             "youtube": {
                 "player_client": [player_client],
@@ -239,6 +242,16 @@ def _get_opts(
         "user_agent": user_agent,
     }
 
+    # CRITICAL: Enable remote components for JS challenge solving
+    if enable_remote_components:
+        print("[PlayerExtraction] Enabling remote components for JS challenge solving")
+        opts["remote_components"] = "ejs:github"
+
+    # OAuth mode
+    if use_oauth:
+        print("[PlayerExtraction] Forcing OAuth extraction mode")
+        opts["extractor_args"]["youtube"]["oauth_verify"] = True
+
     if format_selector:
         opts["format"] = format_selector
 
@@ -246,15 +259,13 @@ def _get_opts(
     cp = _get_cookie_path()
     if cp:
         opts["cookiefile"] = cp
-        print(f"[BotBypass] Using cookies: {cp}")
 
-    # Use proxy if configured
+    # Proxy support
     proxy = os.environ.get("YTDLP_PROXY")
     if proxy:
         opts["proxy"] = proxy
         print(f"[BotBypass] Using proxy: {proxy}")
 
-    # Optional: Add request ID for debugging
     if request_id:
         opts["http_headers"]["X-Request-ID"] = request_id
 
@@ -262,29 +273,17 @@ def _get_opts(
 
 
 # ---------------------------------------------------------------------------
-# Retry Logic with Exponential Backoff
+# Error Classification
 # ---------------------------------------------------------------------------
 
 
 def _should_retry(error_msg: str) -> bool:
-    """
-    Determine if an error is retryable vs. fatal.
-
-    Retryable:
-    - "Sign in to confirm" (bot detection)
-    - "Requested format is not available" (transient)
-    - "429" / "Too Many Requests" (rate limit)
-    - "503" / "Service Unavailable" (temporary)
-
-    Fatal:
-    - "not found" / "Video not available" (permanent)
-    - "Private video" (permission)
-    - "Age-restricted" (policy)
-    """
+    """Determine if error is retryable."""
     error_lower = str(error_msg).lower()
 
-    retryable_keywords = [
+    retryable = [
         "sign in to confirm",
+        "failed to extract any player response",
         "requested format is not available",
         "429",
         "too many requests",
@@ -295,29 +294,34 @@ def _should_retry(error_msg: str) -> bool:
         "connection reset",
         "connection timeout",
         "timed out",
+        "player response",
+        "player error",
+        "remote components",
+        "challenge",
     ]
 
-    fatal_keywords = [
+    fatal = [
         "not found",
         "video not available",
         "private video",
         "age-restricted",
-        "no video formats found",
         "channel does not exist",
     ]
 
-    # Check fatal first (more specific)
-    for keyword in fatal_keywords:
+    for keyword in fatal:
         if keyword in error_lower:
             return False
 
-    # Then check retryable
-    for keyword in retryable_keywords:
+    for keyword in retryable:
         if keyword in error_lower:
             return True
 
-    # Default to retryable for unknown errors
     return True
+
+
+# ---------------------------------------------------------------------------
+# Main Extraction with Fallbacks
+# ---------------------------------------------------------------------------
 
 
 def _extract_with_retry(
@@ -327,38 +331,38 @@ def _extract_with_retry(
     max_retries: int = 3,
 ) -> Dict[str, Any]:
     """
-    Extract video info with intelligent retry logic.
+    Extract with intelligent retry + fallback strategies.
 
-    Strategy:
-    1. Try each player client sequentially
-    2. For each client, retry with exponential backoff on retryable errors
-    3. Return on first success
-    4. Raise last error if all attempts fail
+    Attempts:
+    1. Standard extraction (all player clients, retries with backoff)
+    2. Remote components enabled (for JS challenge solving)
+    3. OAuth mode (for auth issues)
     """
     last_error = None
     request_id = str(uuid.uuid4())[:8]
 
-    for client_idx, client in enumerate(player_clients):
+    for client in player_clients:
         retry_count = 0
-        backoff_multiplier = 1
 
         while retry_count < max_retries:
             try:
-                wait_time = (2**retry_count) * backoff_multiplier + random.uniform(0, 1)
                 if retry_count > 0:
+                    wait_time = (2**retry_count) * 1.0 + random.uniform(0, 1)
                     print(
                         f"[Retry] Client={client}, Attempt={retry_count + 1}/{max_retries}, Wait={wait_time:.1f}s"
                     )
                     time.sleep(wait_time)
 
+                print(
+                    f"[Extract] Client={client}, Attempt={retry_count + 1}, Format={format_selector or 'all'}"
+                )
+
                 opts = _get_opts(
                     player_client=client,
                     format_selector=format_selector,
                     request_id=request_id,
-                )
-
-                print(
-                    f"[Extract] Client={client}, Attempt={retry_count + 1}, Format={format_selector or 'all'}"
+                    enable_remote_components=False,
+                    use_oauth=False,
                 )
 
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -368,6 +372,45 @@ def _extract_with_retry(
             except Exception as e:
                 error_msg = str(e)
                 last_error = e
+
+                # Special handling for player extraction failures
+                if "failed to extract any player response" in error_msg.lower():
+                    print(f"[PlayerExtraction] Fallback: Enabling remote components")
+
+                    try:
+                        opts = _get_opts(
+                            player_client=client,
+                            format_selector=format_selector,
+                            request_id=request_id,
+                            enable_remote_components=True,
+                            use_oauth=False,
+                        )
+                        with yt_dlp.YoutubeDL(opts) as ydl:
+                            info = ydl.extract_info(url, download=False)
+                            print("[PlayerExtraction] ✓ SUCCESS with remote components")
+                            return ydl.sanitize_info(info)
+                    except Exception as rc_error:
+                        print(
+                            f"[PlayerExtraction] Remote components failed: {str(rc_error)[:80]}"
+                        )
+
+                    # Try OAuth
+                    try:
+                        opts = _get_opts(
+                            player_client=client,
+                            format_selector=format_selector,
+                            request_id=request_id,
+                            enable_remote_components=False,
+                            use_oauth=True,
+                        )
+                        with yt_dlp.YoutubeDL(opts) as ydl:
+                            info = ydl.extract_info(url, download=False)
+                            print("[PlayerExtraction] ✓ SUCCESS with OAuth mode")
+                            return ydl.sanitize_info(info)
+                    except Exception as oauth_error:
+                        print(
+                            f"[PlayerExtraction] OAuth failed: {str(oauth_error)[:80]}"
+                        )
 
                 if not _should_retry(error_msg):
                     print(f"[Fatal] {type(e).__name__}: {error_msg[:100]}")
@@ -385,30 +428,13 @@ def _extract_with_retry(
 
 
 def get_video_info(url: str) -> Dict[str, Any]:
-    """
-    Return full metadata + all available formats for a URL.
-    Uses intelligent retry logic with multiple player clients.
-    """
+    """Get full video metadata."""
     player_clients = ["web", "mweb", "android", "ios"]
     return _extract_with_retry(url, player_clients)
 
 
 def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
-    """
-    Resolve best video + audio CDN URLs with aggressive retry logic.
-
-    Returns:
-    {
-        "video_url": str,
-        "audio_url": str (optional),
-        "merged": bool,
-        "needs_merge": bool,
-        "ext": str,
-        "title": str,
-        "thumbnail": str,
-        "filesize_approx": int (optional),
-    }
-    """
+    """Get CDN stream URLs for preset."""
     selector = FORMAT_SELECTORS.get(preset, FORMAT_SELECTORS["mp4_720p"])
     is_audio_only = preset.startswith("audio_")
     ext = _ext_for_preset(preset)
@@ -453,9 +479,7 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
 
 
 def get_formats_list(url: str) -> list:
-    """
-    Return a simplified list of available formats for UI format picker.
-    """
+    """Get available formats."""
     info = get_video_info(url)
     formats = []
     for f in info.get("formats", []):
@@ -475,11 +499,6 @@ def get_formats_list(url: str) -> list:
             }
         )
     return formats
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _ext_for_preset(preset: str) -> str:
