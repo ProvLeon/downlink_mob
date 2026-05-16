@@ -38,6 +38,8 @@ class _QuietLogger:
             print(f"yt-dlp error: {msg}")
 
 
+import os
+
 # Base options — never download, always quiet
 _BASE_OPTS = {
     "quiet": True,
@@ -45,10 +47,27 @@ _BASE_OPTS = {
     "skip_download": True,
     "noplaylist": True,
     "logger": _QuietLogger(),
-    # YouTube bot detection bypass options
-    "extractor_args": {"youtube": {"player_client": ["web"]}},
+    # Advanced bot detection bypass options
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["web", "mweb", "android"],
+            "player_skip": ["js"],  # Skip JS execution if possible
+        }
+    },
+    "http_headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Mode": "navigate",
+    },
     "socket_timeout": 30,
+    "nocheckcertificate": True,
 }
+
+# Apply cookie file if configured in environment
+cookie_file = os.environ.get("YTDLP_COOKIEFILE")
+if cookie_file and os.path.exists(cookie_file):
+    _BASE_OPTS["cookiefile"] = cookie_file
 
 
 def _make_opts(extra: dict = {}) -> dict:
@@ -66,7 +85,8 @@ def get_video_info(url: str) -> Dict[str, Any]:
     Format objects include the direct CDN `url` field.
     """
     # Try multiple times with different player clients
-    player_clients = ["web", "mweb", "android", "ios"]
+    # Prioritise mobile/API clients which are less likely to trigger web CAPTCHAs
+    player_clients = ["android", "ios", "mweb", "web"]
     last_error = None
 
     for player_client in player_clients:
@@ -94,8 +114,9 @@ def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
     is_audio_only = preset.startswith("audio_")
     ext = _ext_for_preset(preset)
 
-    # Try multiple player clients to bypass YouTube bot detection
-    player_clients = ["web", "mweb", "android", "ios"]
+    # Try multiple player clients to bypass YouTube bot detection.
+    # Prioritise mobile/API clients which are less likely to trigger web CAPTCHAs
+    player_clients = ["android", "ios", "mweb", "web"]
     last_error = None
 
     for player_client in player_clients:
