@@ -32,25 +32,23 @@ jobs:
 
       - name: 🚀 Trigger EAS Build
         id: build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           cd downlink_app
-          # We trigger the build and extract the artifact URL or wait for it.
-          # Since --output is local only, we use eas build and then download.
           BUILD_DETAILS=$(eas build --platform android --profile apk --non-interactive --no-wait --json)
           BUILD_ID=$(echo $BUILD_DETAILS | jq -r '.[0].id')
           echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
 
       - name: ⏳ Wait for Build and Download
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           cd downlink_app
-          # Wait for the specific build to complete and download the artifact
-          eas build:view ${{ steps.build.outputs.build_id }} --json > build_info.json
-          # Note: In a real CI environment, we'd loop or use --wait if it supported redirection.
-          # Better approach: trigger build with --wait, then use eas build:list or similar.
-          # Correcting to the standard reliable way:
+          # Trigger build and wait for completion
           eas build --platform android --profile apk --non-interactive --wait
 
-          # Now fetch the actual download URL for the latest completed build of this profile
+          # Fetch the actual download URL for the latest completed build
           DOWNLOAD_URL=$(eas build:list --platform android --profile apk --status finished --limit 1 --json | jq -r '.[0].artifacts.buildUrl')
           curl -L $DOWNLOAD_URL -o ./downlink-android.apk
 
