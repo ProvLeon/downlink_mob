@@ -23,10 +23,13 @@ from typing import Any, Dict, List, Optional
 import yt_dlp
 
 FORMAT_SELECTORS = {
+    "mp4_480p": "bv[height<=480]+ba[ext=m4a]/bv[height<=480]+ba/b",
     "mp4_720p": "bv[height<=720]+ba[ext=m4a]/bv[height<=720]+ba/b",
     "mp4_1080p": "bv[height<=1080]+ba[ext=m4a]/bv[height<=1080]+ba/b",
     "mp4_best": "bv+ba[ext=m4a]/bv+ba/b",
     "audio_best": "ba/b",
+    "audio_mp3": "ba[ext=mp3]/ba/b",
+    "audio_aac": "ba[ext=aac]/ba[ext=m4a]/ba/b",
     "audio_opus": "ba[ext=opus]/ba/b",
 }
 
