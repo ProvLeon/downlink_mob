@@ -22,16 +22,11 @@ from typing import Any, Dict, List, Optional
 
 import yt_dlp
 
-# ---------------------------------------------------------------------------
-# Preset → yt-dlp format selector mapping
-# ---------------------------------------------------------------------------
-FORMAT_SELECTORS: Dict[str, str] = {
-    "mp4_best": "bv+ba/b",
-    "mp4_1080p": "bv[height<=1080]+ba/b[height<=1080]",
-    "mp4_720p": "bv[height<=720]+ba/b[height<=720]",
-    "mp4_480p": "bv[height<=480]+ba/b[height<=480]",
-    "audio_mp3": "ba[ext=mp3]/ba/b",
-    "audio_aac": "ba[ext=m4a]/ba/b",
+FORMAT_SELECTORS = {
+    "mp4_720p": "bv[height<=720]+ba[ext=m4a]/bv[height<=720]+ba/b",
+    "mp4_1080p": "bv[height<=1080]+ba[ext=m4a]/bv[height<=1080]+ba/b",
+    "mp4_best": "bv+ba[ext=m4a]/bv+ba/b",
+    "audio_best": "ba/b",
     "audio_opus": "ba[ext=opus]/ba/b",
 }
 
@@ -39,54 +34,44 @@ FORMAT_SELECTORS: Dict[str, str] = {
 USER_AGENTS = {
     "android": [
         "com.google.android.youtube/19.05.36 (Linux; U; Android 14; en_US) gzip",
-        "com.google.android.youtube/19.05.35 (Linux; U; Android 14; en_US) gzip",
-        "com.google.android.youtube/19.04.36 (Linux; U; Android 13; en_US) gzip",
+        "com.google.android.youtube/18.27.39 (Linux; U; Android 13; en_US) gzip",
     ],
     "ios": [
-        "com.google.ios.youtube/19.05.36 (iPhone16,2; U; CPU iPhone OS 17_3 like Mac OS X; en_US)",
-        "com.google.ios.youtube/19.05.35 (iPhone16,1; U; CPU iPhone OS 17_2 like Mac OS X; en_US)",
-        "com.google.ios.youtube/19.04.36 (iPhone15,2; U; CPU iPhone OS 16_7 like Mac OS X; en_US)",
-    ],
-    "web": [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "YouTube/19.05.3 (iPhone14,6; U; CPU iOS 17_2_1; en_US)",
+        "YouTube/18.32.8 (iPad11,3; U; CPU OS 15_7_1; en_US)",
     ],
     "mweb": [
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
-        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-        "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 13; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+    ],
+    "web": [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 12_6_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
     ],
 }
 
 ACCEPT_LANGUAGES = [
     "en-US,en;q=0.9",
     "en-US,en;q=0.8,fr;q=0.7",
-    "en-US,en;q=0.9,de;q=0.8",
-    "en;q=0.9,en-US;q=0.8",
+    "en-US,en;q=0.7,de;q=0.6,fr;q=0.5",
 ]
-
 
 class _QuietLogger:
     """Suppress verbose yt-dlp logging."""
 
     def debug(self, msg):
         pass
-
+    def info(self, msg):
+        pass
     def warning(self, msg):
         pass
-
     def error(self, msg):
-        if "Requested format is not available" not in msg:
-            print(f"yt-dlp error: {msg}")
-
+        pass
 
 # ---------------------------------------------------------------------------
 # Cookie Management (Enhanced with Validation)
 # ---------------------------------------------------------------------------
 _TEMP_COOKIE_FILE = None
 _COOKIE_INIT_TIME = None
-
 
 def _validate_cookie_file(path: str) -> bool:
     """Check if a cookie file is likely valid YouTube cookies."""
@@ -106,7 +91,6 @@ def _validate_cookie_file(path: str) -> bool:
         print(f"[BotBypass] ✗ Error validating cookies: {e}")
         return False
 
-
 def _get_cookie_path() -> Optional[str]:
     """Returns valid cookie path or None."""
     global _TEMP_COOKIE_FILE, _COOKIE_INIT_TIME
@@ -118,8 +102,6 @@ def _get_cookie_path() -> Optional[str]:
             try:
                 os.remove(_TEMP_COOKIE_FILE)
                 _TEMP_COOKIE_FILE = None
-                _COOKIE_INIT_TIME = None
-                print("[BotBypass] Refreshing expired cookies")
             except:
                 pass
 
@@ -178,12 +160,9 @@ def _get_cookie_path() -> Optional[str]:
     )
     return None
 
-
 # ---------------------------------------------------------------------------
 # Configuration Generator
 # ---------------------------------------------------------------------------
-
-
 def _get_opts(
     player_client: str = "web",
     format_selector: str = None,
@@ -224,10 +203,9 @@ def _get_opts(
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": accept_lang,
             "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.youtube.com/",
+            "Origin": "https://www.youtube.com",
             "DNT": "1",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "none",
             "Cache-Control": "max-age=0",
@@ -236,7 +214,6 @@ def _get_opts(
         "extractor_args": {
             "youtube": {
                 "player_client": [player_client],
-                "player_skip": ["js", "web_money", "configs"],
             }
         },
         "user_agent": user_agent,
@@ -271,12 +248,9 @@ def _get_opts(
 
     return opts
 
-
 # ---------------------------------------------------------------------------
 # Error Classification
 # ---------------------------------------------------------------------------
-
-
 def _should_retry(error_msg: str) -> bool:
     """Determine if error is retryable."""
     error_lower = str(error_msg).lower()
@@ -289,8 +263,7 @@ def _should_retry(error_msg: str) -> bool:
         "too many requests",
         "503",
         "service unavailable",
-        "temporarily unavailable",
-        "try again later",
+        "captcha",
         "connection reset",
         "connection timeout",
         "timed out",
@@ -318,11 +291,9 @@ def _should_retry(error_msg: str) -> bool:
 
     return True
 
-
 # ---------------------------------------------------------------------------
 # Main Extraction with Fallbacks
 # ---------------------------------------------------------------------------
-
 
 def _extract_with_retry(
     url: str,
@@ -415,100 +386,79 @@ def _extract_with_retry(
                 if not _should_retry(error_msg):
                     print(f"[Fatal] {type(e).__name__}: {error_msg[:100]}")
                     raise
-
                 retry_count += 1
-                print(f"[Retryable] {type(e).__name__}: {error_msg[:100]}")
 
-    raise last_error or Exception("All extraction attempts failed")
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
+    raise last_error or Exception("Extraction failed")
 
 def get_video_info(url: str) -> Dict[str, Any]:
     """Get full video metadata."""
     player_clients = ["web", "mweb", "android", "ios"]
     return _extract_with_retry(url, player_clients)
 
-
 def get_stream_urls(url: str, preset: str) -> Dict[str, Any]:
     """Get CDN stream URLs for preset."""
     selector = FORMAT_SELECTORS.get(preset, FORMAT_SELECTORS["mp4_720p"])
     is_audio_only = preset.startswith("audio_")
     ext = _ext_for_preset(preset)
+    info = _extract_with_retry(url, ["web", "mweb", "android", "ios"], selector)
+    best_video = None
+    best_audio = None
 
-    player_clients = ["web", "mweb", "android", "ios"]
+    for f in info.get("formats", []):
+        if is_audio_only and f.get("ext") == ext:
+            best_audio = f
+            break
+        if not is_audio_only and f.get("vcodec", "none") != "none":
+            if not best_video or (f.get("height", 0) > best_video.get("height", 0)):
+                best_video = f
+        if not is_audio_only and f.get("acodec", "none") != "none":
+            if not best_audio or (f.get("abr", 0) > best_audio.get("abr", 0)):
+                best_audio = f
 
-    try:
-        info = _extract_with_retry(url, player_clients, format_selector=selector)
-    except Exception as e:
-        raise Exception(f"Failed to extract stream info: {str(e)}")
-
-    requested = info.get("requested_formats")
-
-    if requested and len(requested) == 2:
-        v_stream = requested[0]
-        a_stream = requested[1]
-        return {
-            "video_url": v_stream.get("url"),
-            "audio_url": a_stream.get("url"),
-            "merged": False,
-            "needs_merge": True,
-            "ext": ext,
-            "title": info.get("title", "Unknown"),
-            "thumbnail": info.get("thumbnail"),
-            "filesize_approx": (
-                (v_stream.get("filesize") or v_stream.get("filesize_approx") or 0)
-                + (a_stream.get("filesize") or a_stream.get("filesize_approx") or 0)
-            )
-            or None,
-        }
+    merged = (
+        best_video is not None
+        and best_audio is not None
+        and best_video["url"] == best_audio["url"]
+    )
+    needs_merge = not merged and best_video and best_audio
 
     return {
-        "video_url": info.get("url") if not is_audio_only else None,
-        "audio_url": info.get("url") if is_audio_only else None,
-        "merged": not is_audio_only,
-        "needs_merge": False,
+        "video_url": best_video["url"] if best_video else None,
+        "audio_url": best_audio["url"] if best_audio and not merged else None,
+        "merged": merged,
+        "needs_merge": needs_merge,
         "ext": ext,
-        "title": info.get("title", "Unknown"),
-        "thumbnail": info.get("thumbnail"),
-        "filesize_approx": info.get("filesize") or info.get("filesize_approx"),
+        "title": info.get("title") or "",
+        "thumbnail": info.get("thumbnail") or "",
+        "filesize_approx": best_video.get("filesize_approx")
+        if best_video
+        else None,
     }
-
 
 def get_formats_list(url: str) -> list:
     """Get available formats."""
     info = get_video_info(url)
     formats = []
     for f in info.get("formats", []):
-        formats.append(
-            {
-                "format_id": f.get("format_id"),
-                "ext": f.get("ext"),
-                "resolution": f.get("resolution"),
-                "fps": f.get("fps"),
-                "vcodec": f.get("vcodec"),
-                "acodec": f.get("acodec"),
-                "filesize": f.get("filesize") or f.get("filesize_approx"),
-                "width": f.get("width"),
-                "height": f.get("height"),
-                "tbr": f.get("tbr"),
-                "format_note": f.get("format_note"),
-            }
-        )
+        fmt = {
+            "format_id": f.get("format_id"),
+            "ext": f.get("ext"),
+            "height": f.get("height"),
+            "width": f.get("width"),
+            "vcodec": f.get("vcodec"),
+            "acodec": f.get("acodec"),
+            "abr": f.get("abr"),
+            "filesize_approx": f.get("filesize_approx"),
+        }
+        formats.append(fmt)
     return formats
-
 
 def _ext_for_preset(preset: str) -> str:
     mapping = {
         "mp4_best": "mp4",
-        "mp4_1080p": "mp4",
         "mp4_720p": "mp4",
-        "mp4_480p": "mp4",
-        "audio_mp3": "mp3",
-        "audio_aac": "m4a",
+        "mp4_1080p": "mp4",
+        "audio_best": "webm",
         "audio_opus": "opus",
     }
     return mapping.get(preset, "mp4")
